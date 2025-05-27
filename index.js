@@ -1,76 +1,98 @@
 const express = require('express');
 const QRCode = require('qrcode');
 const sharp = require('sharp');
+const fs = require('fs');
 const path = require('path');
 
 const app = express();
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json());
 
-const TEMPLATE_PATH = path.join(__dirname, 'template.jpg');
-const WIDTH = 1080;
-const CODE_WIDTH = 700;
-const HEIGHT = 1350;
+const PORT = process.env.PORT || 999;
 
-// Генерируем SVG-оверлей с QR и текстом
-async function makeOverlaySVG({ qrData, orderNumber, ticketNumber, category }) {
-    const qrDataUri = await QRCode.toDataURL(qrData, { margin: 1.5, width: CODE_WIDTH });
+// Размер итогового квадратного изображения
+const SIZE = 1080;
 
-    const qrX = WIDTH/2 - CODE_WIDTH/2;
-    const qrY = HEIGHT/2 - CODE_WIDTH/2 + 140;
-    const lineHeight = 70;
-
-    const centerX = WIDTH / 2;                            // центр по X
-    const textY  = HEIGHT - lineHeight * 1.3;             // ваша Y-координата
-
-    return `
-    <svg width="${WIDTH}" height="${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
-      <image x="${qrX}" y="${qrY}" width="${CODE_WIDTH}" height="${CODE_WIDTH}" href="${qrDataUri}" />
-
-      <style>
-        .label {
-          fill: #fff;
-          font-family: Helvetica, sans-serif;
-          font-weight: bold;
-          font-size: 40px;
-          text-transform: uppercase;
-        }
-      </style>
-
-      <text 
-        x="${centerX}" 
-        y="${textY}" 
-        class="label"
-        text-anchor="middle"
-        dominant-baseline="middle"
-      >
-        ${category} #${ticketNumber}
-      </text>
-    </svg>
-  `;
-}
+// Путь к вашему логотипу (png с прозрачным фоном)
+const LOGO_PATH = path.join(__dirname, 'logo.png');
 
 app.get('/generate', async (req, res) => {
     try {
-        const { qrData, orderNumber, ticketNumber, category } = req.query;
-        if (!qrData || !orderNumber || !ticketNumber || !category) {
-            return res.status(400).json({ error: 'Не все параметры переданы' });
+        const { qr, ticket_id, category } = req.query;
+        if (!qr || !ticket_id || !category) {
+            return res.status(400).json({ error: 'qr, ticket_id и category обязательны' });
         }
 
-        // Загружаем шаблон и компонуем с SVG-оверлеем
-        const overlaySVG = await makeOverlaySVG({ qrData, orderNumber, ticketNumber, category });
-        const ticketBuffer = await sharp(TEMPLATE_PATH)
-            .composite([{ input: Buffer.from(overlaySVG), top: 0, left: 0 }])
+        // 1) Генерация QR-кода в буфер
+        const qrSize = Math.round(SIZE * 0.9);                  // 90% от ширины
+        const qrBuffer = await QRCode.toBuffer(qr, {
+            width: qrSize,
+            margin: 1.4,
+            errorCorrectionLevel: 'H'
+        });
+
+        // 2) Подготовка логотипа
+        const logoRaw = fs.readFileSync(LOGO_PATH);
+        const logoSize = Math.round(qrSize * 0.3);            // 25% от размера QR
+        const logoBuffer = await sharp(logoRaw)
+            .resize(logoSize, logoSize, { fit: 'contain' })
+            .toBuffer();
+
+        // 3) Позиции элементов
+        const margin = Math.round((SIZE - qrSize) / 2);
+        const logoOffset = margin + Math.round((qrSize - logoSize) / 2);
+
+        // 4) SVG-оверлей для текста
+        const textY = SIZE - margin / 2;  // чуть выше нижнего края
+        const fontSize = Math.round(margin * 0.4); // например, 40px если margin=100
+        const textSvg = `
+      <svg width="${SIZE}" height="${SIZE}">
+        <style>
+          .label {
+            fill: #fff;
+            font-size: ${fontSize}px;
+            font-family: sans-serif;
+            font-weight: bold;
+          }
+        </style>
+        <text 
+          x="${SIZE/2}" 
+          y="${textY}" 
+          text-anchor="middle" 
+          dominant-baseline="middle" 
+          class="label"
+        >
+          ${category.toUpperCase()} №${ticket_id}
+        </text>
+      </svg>
+    `;
+
+        // 5) Собираем картинку
+        const finalBuffer = await sharp({
+            create: {
+                width: SIZE,
+                height: SIZE,
+                channels: 3,
+                background: '#000'
+            }
+        })
+            .composite([
+                // QR
+                { input: qrBuffer, top: margin, left: margin },
+                // Логотип
+                { input: logoBuffer, top: logoOffset, left: logoOffset },
+                // Текст
+                { input: Buffer.from(textSvg), top: 0, left: 0 }
+            ])
             .jpeg()
             .toBuffer();
 
         res.set('Content-Type', 'image/jpeg');
-        res.send(ticketBuffer);
+        res.send(finalBuffer);
 
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Ошибка при генерации билета' });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: 'Что-то пошло не так при генерации' });
     }
 });
 
-const PORT = process.env.PORT || 999;
 app.listen(PORT, () => console.log(`Listening on :${PORT}`));
