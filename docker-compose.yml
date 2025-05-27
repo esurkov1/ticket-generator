@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   ticket-generator:
+    restart: always
     build:
       context: .                      # тут ваш Dockerfile
       dockerfile: Dockerfile
