@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  ticket-generator:
+    build: .
+    ports:
+      - "999:999"
+    volumes:
+      - ./template.jpg:/app/template.jpg:ro
+    environment:
+      - NODE_ENV=production
