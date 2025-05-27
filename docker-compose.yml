@@ -1,10 +1,21 @@
 version: '3.8'
+
 services:
   ticket-generator:
-    build: .
+    build:
+      context: .                      # тут ваш Dockerfile
+      dockerfile: Dockerfile
     ports:
-      - "999:999"
-    volumes:
-      - ./template.jpg:/app/template.jpg:ro
-    environment:
-      - NODE_ENV=production
+      - "999:999"                     # внешний проброс
+    networks:
+      - app_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ticket.rule=Host(`tickets.kugasudust.beget.app`)"
+      - "traefik.http.routers.ticket.tls=true"
+      - "traefik.http.routers.ticket.entrypoints=web,websecure"
+      - "traefik.http.routers.ticket.tls.certresolver=mytlschallenge"
+
+networks:
+  app_net:
+    external: true
