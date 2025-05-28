@@ -87,6 +87,7 @@ app.get('/generate', async (req, res) => {
             .toBuffer();
 
         res.set('Content-Type', 'image/jpeg');
+        res.set('Content-Disposition', 'inline; filename="ticket.jpg"');
         res.send(finalBuffer);
 
     } catch (e) {
